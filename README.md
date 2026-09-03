@@ -122,11 +122,69 @@ Messages** should show the record. **Environment → Schema Registry**
 should show a registered schema for subject
 `cloud-avro-orders-topic-value`.
 
+## Running it as a Docker container
+
+`Dockerfile` is a multi-stage build — a `maven:3.9-eclipse-temurin-17`
+stage compiles the jar (`mvn clean package`, including
+`avro-maven-plugin`'s code generation, same as it does locally), then a
+much smaller `eclipse-temurin:17-jre` stage copies in just that jar. The
+final image never contains Maven, your source code, or the build cache —
+only what's needed to run. Nothing needs to be installed on your host to
+build or run this image; `mvn` never runs outside the container.
+
+```bash
+docker build -t cloud-avro-producer .
+docker run --env-file .env -p 8080:8080 cloud-avro-producer
+```
+
+Same `.env` file, same `${VAR}`-driven `application.properties` — the
+container reaches Confluent Cloud identically to the local run above. Verify
+the same way: `curl`/Swagger UI against `localhost:8080`, then check
+Confluent Cloud's topic viewer.
+
+`.dockerignore` keeps `target/`, `.idea/`, `.git/`, and `.env` out of the
+build context entirely, so there's no chance of `.env` ending up inside an
+image layer even by accident.
+
+## Running both together with Docker Compose
+
+A `docker-compose.yml` lives at the parent folder
+(`~/Documents/Learnings/Kafka/docker-compose.yml`), not in this repo —
+it references both this project and
+[`cloud-avro-consumer`](https://github.com/DuminduChamal/cloud-avro-consumer)
+as sibling build contexts, so it isn't owned by either individual project:
+
+```yaml
+services:
+  cloud-avro-producer:
+    build: ./cloud-avro-producer
+    env_file:
+      - ./cloud-avro-producer/.env
+    ports:
+      - "8080:8080"
+
+  cloud-avro-consumer:
+    build: ./cloud-avro-consumer
+    env_file:
+      - ./cloud-avro-consumer/.env
+    depends_on:
+      - cloud-avro-producer
+```
+
+From that parent folder:
+
+```bash
+docker compose up --build   # starts both, streams both containers' logs interleaved
+docker compose down         # stops and removes both
+```
+
+Verified end-to-end: a message sent via `curl` to the composed producer
+was received by the composed consumer within a couple of seconds, both
+logged in the same combined terminal output.
+
 ## What's next
 
-- Containerizing this app with a multi-stage `Dockerfile`, so it can run
-  as a container reaching Confluent Cloud the same way, purely via
-  `--env-file`
-- `cloud-avro-consumer` — the mirrored consumer side, reading this
-  producer's messages back out
-- Docker Compose to run both together with one command
+Nothing planned currently — this pair covers local run, Docker container,
+and Docker Compose orchestration, on top of the Confluent Cloud + Avro +
+Schema Registry fundamentals already built out across the other four
+projects in this series.
